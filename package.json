@@ -1,0 +1,20 @@
+{
+  "name": "snippetbox",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "watch-server": "nodemon --watch './**/*.go' --ext '*' --signal SIGTERM --exec 'go' run ./cmd/web",
+    "watch-browser": "node ./.tasks/start.js",
+    "dev": "concurrently --kill-others-on-fail npm:watch-server npm:watch-browser"
+  },
+  "author": "",
+  "type": "module",
+  "license": "ISC",
+  "devDependencies": {
+    "browser-sync": "^2.29.3",
+    "concurrently": "^8.2.2",
+    "dotenv": "^16.3.1",
+    "nodemon": "^3.0.2"
+  }
+}
