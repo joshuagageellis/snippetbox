@@ -1,70 +1,105 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
 
+	"github.com/joshuagageellis/snippetbox.git/internal/models"
+
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/joho/godotenv"
 )
 
+// Application dependencies.
+type application struct {
+	logger   *slog.Logger
+	snippets *models.SnippetModel
+}
+
 func main() {
+	// Logger.
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		AddSource: true,
+	}))
+
+	// Init new application.
+	app := &application{
+		logger: logger,
+	}
+
 	enverr := godotenv.Load()
 	if enverr != nil {
-		log.Fatal("Error loading .env file")
+		app.logger.Error("Error loading .env file")
+		os.Exit(1)
 	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
-		log.Fatal("PORT must be set in env file")
+		app.logger.Error("PORT must be set in env file")
+		os.Exit(1)
 	}
 
 	host := os.Getenv("HOST")
 	if host == "" {
-		log.Fatal("HOST must be set in env file")
+		app.logger.Error("HOST must be set in env file")
+		os.Exit(1)
 	}
 
-	// Initialize a new serve mux
-	mux := http.NewServeMux()
+	dsn := os.Getenv("DSN")
+	if dsn == "" {
+		app.logger.Error("DSN must be set in env file")
+		os.Exit(1)
+	}
+	// Init DB pool.
+	db, err := openDB(dsn)
+	if err != nil {
+		app.logger.Error(err.Error())
+		os.Exit(1)
+	}
 
-	// File server.
-	fileServer := http.FileServer(neuteredFileSystem{http.Dir("./ui/static")})
-	mux.Handle("/static", http.NotFoundHandler())
-	mux.Handle("/static/", http.StripPrefix("/static", fileServer))
+	// We also defer a call to db.Close(), so that the connection pool is closed
+	// before the main() function exits.
+	defer db.Close()
 
-	mux.HandleFunc("/", home)
-	mux.HandleFunc("/snippet/view", snippetView)
-	mux.HandleFunc("/snippet/create", snippetCreate)
+	// Initialize a new instance of SnippetModel and add it to the application
+	// dependencies.
+	app.snippets = &models.SnippetModel{DB: db}
 
-	log.Print(fmt.Sprintf("Start on %s:%s", host, port))
+	// Init table.
+	err = app.snippets.CreateSnippetTable()
+	if err != nil {
+		app.logger.Error(err.Error())
+		os.Exit(1)
+	}
 
-	err := http.ListenAndServe(fmt.Sprintf("%s:%s", host, port), mux)
-	log.Fatal(err)
+	// Init index.
+	app.snippets.CreateSnippetIndex()
+	if err != nil {
+		app.logger.Warn(err.Error(), "msg", "index already exists")
+	}
+
+	app.logger.Info(fmt.Sprintf("Start on %s:%s", host, port))
+
+	errServer := http.ListenAndServe(fmt.Sprintf("%s:%s", host, port), app.routes())
+	log.Fatal(errServer)
 }
 
-type neuteredFileSystem struct {
-	fs http.FileSystem
-}
-
-func (nfs neuteredFileSystem) Open(path string) (http.File, error) {
-	f, err := nfs.fs.Open(path)
+// The openDB() function wraps sql.Open() and returns a sql.DB connection pool
+// for a given DSN.
+func openDB(dsn string) (*sql.DB, error) {
+	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		return nil, err
 	}
 
-	s, err := f.Stat()
-	if s.IsDir() {
-		index := filepath.Join(path, "index.html")
-		if _, err := nfs.fs.Open(index); err != nil {
-			closeErr := f.Close()
-			if closeErr != nil {
-				return nil, closeErr
-			}
-
-			return nil, err
-		}
+	err = db.Ping()
+	if err != nil {
+		return nil, err
 	}
 
-	return f, nil
+	return db, nil
 }
