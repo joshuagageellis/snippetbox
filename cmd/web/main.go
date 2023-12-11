@@ -11,13 +11,19 @@ import (
 	"github.com/joshuagageellis/snippetbox.git/internal/models"
 
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/joho/godotenv"
 )
+
+type Env struct {
+	PORT string
+	HOST string
+	DSN  string
+}
 
 // Application dependencies.
 type application struct {
 	logger   *slog.Logger
 	snippets *models.SnippetModel
+	env      *Env
 }
 
 func main() {
@@ -31,31 +37,11 @@ func main() {
 		logger: logger,
 	}
 
-	enverr := godotenv.Load()
-	if enverr != nil {
-		app.logger.Error("Error loading .env file")
-		os.Exit(1)
-	}
+	// Load env.
+	loadEnv(app)
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		app.logger.Error("PORT must be set in env file")
-		os.Exit(1)
-	}
-
-	host := os.Getenv("HOST")
-	if host == "" {
-		app.logger.Error("HOST must be set in env file")
-		os.Exit(1)
-	}
-
-	dsn := os.Getenv("DSN")
-	if dsn == "" {
-		app.logger.Error("DSN must be set in env file")
-		os.Exit(1)
-	}
 	// Init DB pool.
-	db, err := openDB(dsn)
+	db, err := openDB(app.env.DSN)
 	if err != nil {
 		app.logger.Error(err.Error())
 		os.Exit(1)
@@ -82,9 +68,9 @@ func main() {
 		app.logger.Warn(err.Error(), "msg", "index already exists")
 	}
 
-	app.logger.Info(fmt.Sprintf("Start on %s:%s", host, port))
+	app.logger.Info(fmt.Sprintf("Start on %s:%s", app.env.HOST, app.env.PORT))
 
-	errServer := http.ListenAndServe(fmt.Sprintf("%s:%s", host, port), app.routes())
+	errServer := http.ListenAndServe(fmt.Sprintf("%s:%s", app.env.HOST, app.env.PORT), app.routes())
 	log.Fatal(errServer)
 }
 

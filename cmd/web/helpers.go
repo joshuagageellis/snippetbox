@@ -1,8 +1,14 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
+	"os"
+	"reflect"
 	"runtime/debug"
+	"strings"
+
+	"github.com/joho/godotenv"
 )
 
 // The serverError helper writes a log entry at Error level (including the request
@@ -33,4 +39,32 @@ func (app *application) clientError(w http.ResponseWriter, status int) {
 // the user.
 func (app *application) notFound(w http.ResponseWriter) {
 	app.clientError(w, http.StatusNotFound)
+}
+
+// Load env.
+// Add additional env vars to Env struct.
+// Will populate Env struct with env vars.
+func loadEnv(app *application) {
+	enverr := godotenv.Load()
+	if enverr != nil {
+		app.logger.Error("Error loading .env file")
+		os.Exit(1)
+	}
+
+	app.env = &Env{}
+
+	fields := reflect.VisibleFields(reflect.TypeOf(struct{ Env }{}))
+
+	for _, field := range fields {
+		if field.Type != reflect.TypeOf("") {
+			continue
+		}
+		up := strings.ToUpper(field.Name)
+		v := os.Getenv(up)
+		if v == "" {
+			app.logger.Error(fmt.Sprintf("Error loading .env file. Missing: %s", up))
+			os.Exit(1)
+		}
+		reflect.ValueOf(app.env).Elem().FieldByName(field.Name).SetString(v)
+	}
 }
