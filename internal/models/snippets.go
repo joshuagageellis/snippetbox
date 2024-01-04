@@ -122,9 +122,57 @@ func (m *SnippetModel) CreateSnippetTable() error {
 
 // Create index.
 func (m *SnippetModel) CreateSnippetIndex() error {
+	stmt := `CREATE INDEX idx_snippets_created ON snippets(created)`
+	_, err := m.DB.Exec(stmt)
+	return err
+}
+
+// Create sessions table.
+func (m *SnippetModel) CreateSessionTable() error {
 	stmt := `
-		CREATE INDEX idx_snippets_created ON snippets(created)
+		CREATE TABLE IF NOT EXISTS sessions (
+			token CHAR(43) PRIMARY KEY,
+			data BLOB NOT NULL,
+			expiry TIMESTAMP(6) NOT NULL
+		)
 	`
 	_, err := m.DB.Exec(stmt)
 	return err
+}
+
+// Create sessions index.
+func (m *SnippetModel) CreateSessionIndex() error {
+	stmt := `CREATE INDEX sessions_expiry_idx ON sessions(expiry);`
+	_, err := m.DB.Exec(stmt)
+	return err
+}
+
+// Dev seed database.
+func (m *SnippetModel) SeedDatabase() error {
+	// Check if tables exist, if so return.
+	stmt := `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ('snippets', 'sessions')`
+	var count int
+	err := m.DB.QueryRow(stmt).Scan(&count)
+	if err != nil {
+		return err
+	}
+
+	if count > 0 {
+		return nil
+	}
+
+	// Setup tables and indexes.
+	if err := m.CreateSnippetTable(); err != nil {
+		return err
+	}
+	if err := m.CreateSnippetIndex(); err != nil {
+		return err
+	}
+	if err := m.CreateSessionTable(); err != nil {
+		return err
+	}
+	if err := m.CreateSessionIndex(); err != nil {
+		return err
+	}
+	return nil
 }

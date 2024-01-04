@@ -3,27 +3,35 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"html/template"
 	"log"
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
-	"github.com/joshuagageellis/snippetbox.git/internal/models"
-
+	"github.com/alexedwards/scs/mysqlstore"
+	"github.com/alexedwards/scs/v2"
+	"github.com/go-playground/form/v4"
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/joshuagageellis/snippetbox.git/internal/models"
 )
 
 type Env struct {
 	PORT string
 	HOST string
 	DSN  string
+	ENV  string
 }
 
 // Application dependencies.
 type application struct {
-	logger   *slog.Logger
-	snippets *models.SnippetModel
-	env      *Env
+	logger         *slog.Logger
+	snippets       *models.SnippetModel
+	env            *Env
+	templateCache  map[string]*template.Template
+	formDecoder    *form.Decoder
+	sessionManager *scs.SessionManager
 }
 
 func main() {
@@ -55,17 +63,32 @@ func main() {
 	// dependencies.
 	app.snippets = &models.SnippetModel{DB: db}
 
-	// Init table.
-	err = app.snippets.CreateSnippetTable()
+	// Init form decoder.
+	app.formDecoder = form.NewDecoder()
+
+	// Seed database.
+	if app.env.ENV == "dev" {
+		err = app.snippets.SeedDatabase()
+		if err != nil {
+			app.logger.Error(err.Error())
+			os.Exit(1)
+		}
+	}
+
+	// Use the scs.New() function to initialize a new session manager. Then we
+	// configure it to use our MySQL database as the session store, and set a
+	// lifetime of 12 hours (so that sessions automatically expire 12 hours
+	// after first being created).
+	sessionManager := scs.New()
+	sessionManager.Store = mysqlstore.New(db)
+	sessionManager.Lifetime = 12 * time.Hour
+	app.sessionManager = sessionManager
+
+	// Init template cache.
+	app.templateCache, err = newTemplateCache()
 	if err != nil {
 		app.logger.Error(err.Error())
 		os.Exit(1)
-	}
-
-	// Init index.
-	app.snippets.CreateSnippetIndex()
-	if err != nil {
-		app.logger.Warn(err.Error(), "msg", "index already exists")
 	}
 
 	app.logger.Info(fmt.Sprintf("Start on %s:%s", app.env.HOST, app.env.PORT))

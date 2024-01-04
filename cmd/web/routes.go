@@ -1,17 +1,37 @@
 package main
 
-import "net/http"
+import (
+	"net/http"
 
-// The routes() method returns a servemux containing our application routes.
-func (app *application) routes() *http.ServeMux {
-	mux := http.NewServeMux()
+	"github.com/julienschmidt/httprouter"
+	"github.com/justinas/alice"
+)
 
+func (app *application) routes() http.Handler {
+	// Initialize the router.
+	router := httprouter.New()
+
+	// Generic 404.
+	router.NotFound = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		app.notFound(w)
+	})
+
+	// Update the pattern for the route for the static files.
 	fileServer := http.FileServer(http.Dir("./ui/static/"))
-	mux.Handle("/static/", http.StripPrefix("/static", fileServer))
+	router.Handler(http.MethodGet, "/static/*filepath", http.StripPrefix("/static", fileServer))
 
-	mux.HandleFunc("/", app.home)
-	mux.HandleFunc("/snippet/view", app.snippetView)
-	mux.HandleFunc("/snippet/create", app.snippetCreate)
+	dynamic := alice.New(app.sessionManager.LoadAndSave)
 
-	return mux
+	// And then create the routes using the appropriate methods, patterns and
+	// handlers.
+	router.Handler(http.MethodGet, "/", dynamic.ThenFunc(app.home))
+	router.Handler(http.MethodGet, "/snippet/view/:id", dynamic.ThenFunc(app.snippetView))
+	router.Handler(http.MethodGet, "/snippet/create", dynamic.ThenFunc(app.snippetCreate))
+	router.Handler(http.MethodPost, "/snippet/create", dynamic.ThenFunc(app.snippetCreatePost))
+
+	// Create the middleware chain as normal.
+	standard := alice.New(app.recoverPanic, app.logRequest, secureHeaders)
+
+	// Wrap the router with the middleware and return it as normal.
+	return standard.Then(router)
 }
